@@ -121,8 +121,8 @@ function ActiveView({
 }
 
 export default function App() {
-  const atelier = useAtelier();
   const apiStatus = useApiStatus();
+  const atelier = useAtelier(apiStatus.status?.database_ready ?? null);
   const databaseReady = apiStatus.status?.database_ready ?? false;
   const [inviteToken, setInviteToken] = useState<string | null>(() => getInviteTokenFromUrl());
   const [postInviteEmail, setPostInviteEmail] = useState("");

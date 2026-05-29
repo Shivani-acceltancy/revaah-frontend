@@ -1,6 +1,6 @@
 /** Grid card from GET /projects (published library) */
 export type ProjectListItem = {
-  id: string;
+  id: string | number;
   title: string;
   theme?: string;
   city?: { id: string; name: string } | string;
@@ -38,11 +38,14 @@ export type ProjectGalleryAsset = {
   is_cover?: boolean;
   show_in_gallery?: boolean;
   urls?: { thumb?: string; medium?: string; large?: string };
+  url?: string;
+  media_url?: string;
+  public_url?: string;
   layout_hint?: "full" | "half" | "third" | "two_third";
 };
 
 export type ProjectDetail = {
-  id: string;
+  id: string | number;
   title: string;
   theme?: string;
   status?: string;
@@ -51,6 +54,9 @@ export type ProjectDetail = {
   visible_to?: "WHOLE_TEAM" | "CURATORS_AND_OWNER" | "SPECIFIC_USERS";
   shareable_by?: string;
   created_by?: string;
+  created_by_name?: string;
+  created_at?: string;
+  updated_at?: string;
   can_edit?: boolean;
   can_publish?: boolean;
   can_delete?: boolean;

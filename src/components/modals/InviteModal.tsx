@@ -13,6 +13,7 @@ const ROLE_MAP = {
   owner: "OWNER",
   curator: "CURATOR",
   member: "MEMBER",
+  readonly: "READ_ONLY",
 } as const;
 
 const DEPT_MAP: Record<string, string> = {
@@ -35,7 +36,7 @@ export default function InviteModal({ open, onClose, onSuccess, apiConnected, da
   async function handleSend() {
     if (!apiConnected) {
       setError(
-        "API is offline. Start the backend on port 8081 (see README), then try again.",
+        "API is offline. Start backend and try again.",
       );
       return;
     }
@@ -147,6 +148,7 @@ export default function InviteModal({ open, onClose, onSuccess, apiConnected, da
               <option value="owner">Owner — full access, invite & manage team</option>
               <option value="curator">Curator — upload, edit, share</option>
               <option value="member">Member — browse & share with approval</option>
+              <option value="readonly">Read only — browse only</option>
             </select>
           </div>
           <div className="form-field">

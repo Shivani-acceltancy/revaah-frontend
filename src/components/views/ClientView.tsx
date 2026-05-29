@@ -3,22 +3,22 @@ import { WATERMARK_TEXT } from "../../lib/atelier";
 
 const TILES = [
   {
-    image: "https://images.unsplash.com/photo-1519225421980-715cb0215aed?w=1200&q=80",
+    image: "",
     sub: "Mehendi · Forest Grove",
     title: "Marigold canopy at dusk",
   },
   {
-    image: "https://images.unsplash.com/photo-1583939003579-730e3918a45a?w=1200&q=80",
+    image: "",
     sub: "Sangeet · The Canopy",
     title: "Embroidered constellations",
   },
   {
-    image: "https://images.unsplash.com/photo-1606800052052-a08af7148866?w=1200&q=80",
+    image: "",
     sub: "Phera · Water's Edge",
     title: "Carved teak mandap",
   },
   {
-    image: "https://images.unsplash.com/photo-1465495976277-4387d4b0e4a6?w=1200&q=80",
+    image: "",
     sub: "Reception · Brass & Wine",
     title: "The forest after midnight",
   },
@@ -57,7 +57,11 @@ export default function ClientView() {
 
       <div className="cv-grid">
         {TILES.map((t) => (
-          <div key={t.title} className="cv-tile" style={{ backgroundImage: `url('${t.image}')` }}>
+          <div
+            key={t.title}
+            className="cv-tile"
+            style={t.image ? { backgroundImage: `url('${t.image}')` } : { background: "#1a1411" }}
+          >
             <div className="cap">
               <span className="sub">{t.sub}</span>
               {t.title}

@@ -93,7 +93,8 @@ const CITY_OPTIONS_SORTED = [...CITY_OPTIONS].sort((a, b) => a.localeCompare(b))
 
 type FilePreview = {
   key: string;
-  file: File;
+  file?: File;
+  fileName: string;
   previewUrl: string;
   status: "pending" | "uploading" | "done" | "error";
   source: "gallery" | "cover";
@@ -102,10 +103,9 @@ type FilePreview = {
   error?: string;
 };
 
-const VISIBLE_TO_MAP: Record<string, "WHOLE_TEAM" | "CURATORS_AND_OWNER" | "SPECIFIC_USERS"> = {
+const VISIBLE_TO_MAP: Record<string, "WHOLE_TEAM" | "CURATORS_AND_OWNER"> = {
   "Whole team": "WHOLE_TEAM",
   "Curators & Owner only": "CURATORS_AND_OWNER",
-  "Specific people": "SPECIFIC_USERS",
 };
 
 const SHAREABLE_BY_MAP: Record<string, string> = {
@@ -125,7 +125,7 @@ export default function UploadView({
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | number | null>(null);
   const [title, setTitle] = useState("");
   const [coverUrl, setCoverUrl] = useState("");
   const [theme, setTheme] = useState("");
@@ -155,13 +155,47 @@ export default function UploadView({
     { id: number; who: string; what: string; at: Date }[]
   >([]);
   const actorName = currentUser?.fullName?.trim() || currentUser?.email?.trim() || "User";
+  const shortProjectId = (id: unknown) => String(id ?? "").slice(0, 8);
+  const safePreviewUrl = (file: File) => {
+    try {
+      return file.type.startsWith("image/") ? URL.createObjectURL(file) : "";
+    } catch {
+      return "";
+    }
+  };
 
   useEffect(() => {
-    if (!editingProjectId) return;
+    if (!editingProjectId) {
+      // When opening "New project", always start from a clean form so old edit data
+      // (cover/palette/tags) never leaks into another project.
+      setProjectId(null);
+      setTitle("");
+      setCoverUrl("");
+      setTheme("");
+      setEventType("Wedding");
+      setEventDate("");
+      setGuestCount("");
+      setVenue("");
+      setCity("");
+      setNarrative("");
+      setSetting("Outdoor");
+      setPhotoCredit("");
+      setVisibleTo("Whole team");
+      setShareableBy("Curators & Owner");
+      setOwnerOfRecord(currentUser?.fullName ?? "");
+      setPalette([]);
+      setStyleTags([]);
+      setPreviews([]);
+      setActivities([]);
+      setSaveMsg(null);
+      return;
+    }
+
     fetchProjectDetailApi(editingProjectId)
       .then((d) => {
-        setProjectId(d.id);
+        setProjectId(String(d.id));
         setTitle(d.title ?? "");
+        setCoverUrl(d.cover_url ?? "");
         setTheme(d.theme ?? "");
         setEventType((d.event_types?.[0] ?? "WEDDING").toLowerCase().replace(/^./, (c) => c.toUpperCase()));
         setEventDate(d.event_date ?? "");
@@ -172,11 +206,9 @@ export default function UploadView({
         setPhotoCredit(d.photo_credit ?? "");
         setSetting((d.setting ?? "OUTDOOR").toLowerCase().replace(/^./, (c) => c.toUpperCase()));
         setVisibleTo(
-          d.visible_to === "CURATORS_AND_OWNER"
+          d.visible_to === "CURATORS_AND_OWNER" || d.visible_to === "SPECIFIC_USERS"
             ? "Curators & Owner only"
-            : d.visible_to === "SPECIFIC_USERS"
-              ? "Specific people"
-              : "Whole team",
+            : "Whole team",
         );
         setShareableBy(
           d.shareable_by === "WHOLE_TEAM"
@@ -187,12 +219,41 @@ export default function UploadView({
         );
         setPalette((d.palette ?? []).map((p) => (typeof p === "string" ? p : p.hex)));
         setStyleTags((d.style_tags ?? []).map((t) => (typeof t === "string" ? t : t.name)));
+        const existingAssets: FilePreview[] = (d.all_assets ?? []).map((a, idx) => {
+          const previewUrl = a.urls?.medium ?? a.urls?.large ?? a.urls?.thumb ?? "";
+          const isCover = Boolean(a.is_cover);
+          return {
+            key: `existing-${a.id ?? idx}`,
+            fileName: String(a.id ?? `asset-${idx}`),
+            previewUrl,
+            status: "done",
+            source: isCover ? "cover" : "gallery",
+            assetId: a.id,
+            isCover,
+          };
+        });
+        setPreviews(existingAssets);
+        const lastAtRaw = d.updated_at ?? d.created_at ?? null;
+        if (lastAtRaw) {
+          const parsed = new Date(lastAtRaw);
+          const hasValidDate = !Number.isNaN(parsed.getTime());
+          setActivities([
+            {
+              id: Date.now(),
+              who: d.created_by_name?.trim() || actorName,
+              what: "last saved draft details",
+              at: hasValidDate ? parsed : new Date(),
+            },
+          ]);
+        } else {
+          setActivities([]);
+        }
         setSaveMsg({ type: "ok", text: "Editing existing project draft." });
       })
       .catch((e) => {
         setSaveMsg({ type: "err", text: e instanceof ApiError ? e.message : "Could not load project for edit." });
       });
-  }, [editingProjectId]);
+  }, [actorName, currentUser?.fullName, editingProjectId]);
 
   useEffect(() => {
     if (!editingProjectId) {
@@ -228,14 +289,15 @@ export default function UploadView({
     styleTags,
   });
 
-  const ensureProjectId = useCallback(async (): Promise<string> => {
+  const ensureProjectId = useCallback(async (): Promise<string | number> => {
     if (projectId) {
       await updateProjectApi(projectId, updateBody());
       return projectId;
     }
     const created = await createProjectApi(formBody());
-    setProjectId(created.id);
-    setSaveMsg({ type: "ok", text: `Draft saved (${created.id.slice(0, 8)}…) — uploading files…` });
+    const createdId = created.id;
+    setProjectId(createdId);
+    setSaveMsg({ type: "ok", text: `Draft saved (${shortProjectId(created.id)}…) — uploading files…` });
     setActivities((prev) => [
       {
         id: Date.now(),
@@ -245,7 +307,7 @@ export default function UploadView({
       },
       ...prev,
     ]);
-    return created.id;
+    return createdId;
   }, [projectId, title, coverUrl, theme, eventType, eventDate, guestCount, setting, venue, city, narrative, photoCredit, palette, styleTags, actorName]);
 
   const saveDraft = async () => {
@@ -257,9 +319,10 @@ export default function UploadView({
         setSaveMsg({ type: "ok", text: "Draft updated and saved to database." });
       } else {
         const created = await createProjectApi(formBody());
-        setProjectId(created.id);
-        await updateProjectApi(created.id, updateBody());
-        setSaveMsg({ type: "ok", text: `Draft created (id: ${created.id}).` });
+        const createdId = created.id;
+        setProjectId(createdId);
+        await updateProjectApi(createdId, updateBody());
+        setSaveMsg({ type: "ok", text: `Draft created (id: ${createdId}).` });
       }
       setActivities((prev) => [
         {
@@ -296,7 +359,8 @@ export default function UploadView({
     const newPreviews: FilePreview[] = files.map((file) => ({
       key: `${file.name}-${file.size}-${file.lastModified}`,
       file,
-      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : "",
+      fileName: file.name,
+      previewUrl: safePreviewUrl(file),
       status: "pending" as const,
       source,
     }));
@@ -503,7 +567,7 @@ export default function UploadView({
           {!databaseReady && (
             <div className="save-toast save-toast--err">
               Database tables are not ready. You can fill the form and click Save — the API will respond but
-              nothing will be stored until your senior finishes the DB.
+              nothing will be stored until your team finishes the DB.
             </div>
           )}
 
@@ -716,7 +780,7 @@ export default function UploadView({
                                     ? "!"
                                     : "·"}
                             </span>
-                            <span>{p.file.name.slice(0, 12)}</span>
+                            <span>{p.fileName.slice(0, 12)}</span>
                           </div>
                         </div>
                       ))}
@@ -744,7 +808,7 @@ export default function UploadView({
                                     ? "!"
                                     : "·"}
                             </span>
-                            <span>{p.file.name.slice(0, 12)}</span>
+                            <span>{p.fileName.slice(0, 12)}</span>
                           </div>
                         </div>
                       ))}
@@ -853,7 +917,6 @@ export default function UploadView({
                     <select value={visibleTo} onChange={(e) => setVisibleTo(e.target.value)}>
                       <option>Whole team</option>
                       <option>Curators & Owner only</option>
-                      <option>Specific people</option>
                     </select>
                   </div>
                   <div className="form-field">
@@ -885,7 +948,7 @@ export default function UploadView({
                 <div className="left">
                   <span className="status-dot" />
                   <span className="status-txt">
-                    {projectId ? `Draft · ${projectId.slice(0, 8)}…` : "Draft · not saved yet"}
+                    {projectId ? `Draft · ${shortProjectId(projectId)}…` : "Draft · not saved yet"}
                     {previews.filter((p) => p.status === "done").length > 0 &&
                       ` · ${previews.filter((p) => p.status === "done").length} uploaded`}
                   </span>

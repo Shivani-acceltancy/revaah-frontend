@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const devPort = Number(env.VITE_DEV_PORT) || 8080;
+  const devPort = Number(env.VITE_DEV_PORT) || 5173;
   const apiTarget = env.VITE_API_PROXY_TARGET || "http://localhost:8081";
 
   return {

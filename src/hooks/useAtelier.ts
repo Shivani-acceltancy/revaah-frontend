@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ApiError,
-  fetchSystemStatus,
   loginApi,
   uiPreviewLoginApi,
 } from "../lib/api";
@@ -21,7 +20,7 @@ function readStoredUser(): SessionUser | null {
   }
 }
 
-export function useAtelier() {
+export function useAtelier(sharedDbReady: boolean | null = null) {
   const [view, setView] = useState<AtelierView>("login");
   const [libraryMode, setLibraryMode] = useState<LibraryMode>("atelier");
   const [libraryReturnMode, setLibraryReturnMode] = useState<LibraryMode>("atelier");
@@ -37,10 +36,10 @@ export function useAtelier() {
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(() => readStoredUser());
 
   useEffect(() => {
-    fetchSystemStatus()
-      .then((s) => setDbReady(s.database_ready))
-      .catch(() => setDbReady(false));
-  }, []);
+    if (sharedDbReady !== null) {
+      setDbReady(sharedDbReady);
+    }
+  }, [sharedDbReady]);
 
   const show = useCallback((name: AtelierView) => {
     const unlocked = sessionStorage.getItem(STORAGE_KEY) === "1";
@@ -130,7 +129,7 @@ export function useAtelier() {
         if (e instanceof ApiError) {
           setLoginError(e.message);
         } else {
-          setLoginError("Cannot reach backend API. Is it running on port 8080?");
+          setLoginError("Cannot reach backend API. Please ensure backend is running.");
         }
         return false;
       }

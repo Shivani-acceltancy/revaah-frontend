@@ -3,9 +3,16 @@ dist
 .DS_Store
 *.local
 .npm-cache
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
 
 # Secrets — copy .env.example to .env and fill in locally only
 .env
 .env.local
 .env.*.local
 !.env.example
+*.pem
+*.key
+credentials.json
+**/secrets/

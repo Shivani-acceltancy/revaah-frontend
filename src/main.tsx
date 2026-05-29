@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import AppErrorBoundary from "./components/AppErrorBoundary";
 import "./styles/tailwind.css";
 import "./styles/atelier.css";
 
@@ -10,7 +11,7 @@ if (!rootElement) {
 }
 
 ReactDOM.createRoot(rootElement).render(
-  <React.StrictMode>
+  <AppErrorBoundary>
     <App />
-  </React.StrictMode>,
+  </AppErrorBoundary>,
 );

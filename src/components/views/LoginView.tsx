@@ -87,7 +87,7 @@ export default function LoginView({
             API connected · Database not ready — login will use preview mode (no data saved).
           </div>
         )}
-        <div className="login-foot">Backend: /v1 via Vite proxy · port 8080</div>
+        <div className="login-foot">Backend: /v1 via Vite proxy · target from .env</div>
       </div>
     </section>
   );

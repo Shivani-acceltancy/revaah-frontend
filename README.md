@@ -31,7 +31,7 @@ Backend handoff for your API/DB team:
 
 ## Local dev (current team setup)
 
-**Port 8080 = frontend only.** The API runs on **8081**. Swagger: http://localhost:8081/swagger-ui.html
+Backend API runs on **8081** and frontend UI should run on a different port (recommended **5173**).
 
 Copy `.env.example` → `.env` (or use the values below), then:
 
@@ -48,17 +48,20 @@ npm run dev
 ### `.env` (frontend)
 
 ```bash
-VITE_DEV_PORT=8080
+VITE_DEV_PORT=5173
 VITE_API_PROXY_TARGET=http://localhost:8081
-VITE_API_BASE_URL=
+VITE_API_BASE_URL=http://localhost:8081/v1
 ```
 
-Restart `npm run dev` after changing `.env`. Open **http://localhost:8080** (not 8081).
+Restart `npm run dev` after changing `.env`. Open **http://localhost:5173** for UI. Do not open **http://localhost:8081/** expecting a webpage (API server only).
 
 | What | URL |
 |------|-----|
-| Frontend UI | http://localhost:8080 |
+| Frontend UI | http://localhost:5173 |
 | API + Swagger | http://localhost:8081/swagger-ui.html |
+| OpenAPI docs | http://localhost:8081/api-docs |
+| API base path | http://localhost:8081/v1 |
+| Media base URL | http://localhost:8081/v1/media |
 | System status | http://localhost:8081/v1/system/status |
 
 When connected, the green banner shows: **API connected · Database ready**.
@@ -72,9 +75,11 @@ When connected, the green banner shows: **API connected · Database ready**.
 
 Then: **Admin → New project** → Save draft → **Publish** → check **Projects**.
 
-### Alternate setup (optional)
+### Backend error notes
 
-If the API runs on **8080** instead, use `VITE_DEV_PORT=5173` and `VITE_API_PROXY_TARGET=http://localhost:8080` — stop the frontend before starting the backend on 8080.
+- `DATABASE_NOT_CONNECTED` means backend-to-database connectivity issue, not a frontend bug.
+- If publish fails with `PUBLISH_VALIDATION_FAILED`, inspect `error.details` from the API response (the frontend now appends these details in error toast text).
+- CORS already allows localhost origins (`http://localhost:*`, `http://127.0.0.1:*`).
 
 ## Demo bar
 

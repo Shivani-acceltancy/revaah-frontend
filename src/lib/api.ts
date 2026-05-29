@@ -1,7 +1,13 @@
-import type { ProjectDetail, ProjectListItem, ProjectsListResponse, ProjectStats } from "../types/project";
+import type {
+  ProjectDetail,
+  ProjectGalleryAsset,
+  ProjectListItem,
+  ProjectsListResponse,
+  ProjectStats,
+} from "../types/project";
 import { normalizeProjectStats, parseProjectsList } from "./projects";
 
-/** Default: Vite proxy `/v1` → localhost:8080 (see vite.config.ts) */
+/** Default: Vite proxy `/v1` → target from `vite.config.ts` and `.env` */
 function resolveApiBase(): string {
   const raw = import.meta.env.VITE_API_BASE_URL;
   if (raw === undefined || raw === "") {
@@ -12,8 +18,134 @@ function resolveApiBase(): string {
 
 const API_BASE = resolveApiBase();
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function asString(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (typeof value === "number") return String(value);
+  return undefined;
+}
+
+function asBool(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  return undefined;
+}
+
+function normalizeAsset(raw: unknown, idx: number) {
+  const r = asRecord(raw);
+  const urlsRaw = asRecord(r.urls ?? r.derivatives);
+  const directUrl =
+    asString(r.url) ??
+    asString(r.media_url) ??
+    asString(r.mediaUrl) ??
+    asString(r.public_url) ??
+    asString(r.publicUrl);
+  const kindRaw = asString(r.kind) ?? asString(r.type) ?? asString(r.media_type) ?? asString(r.mediaType);
+  const kind = kindRaw?.toUpperCase().includes("VIDEO") ? "VIDEO" : "IMAGE";
+
+  const layoutHintRaw = asString(r.layout_hint) ?? asString(r.layoutHint);
+  const layout_hint: ProjectGalleryAsset["layout_hint"] =
+    layoutHintRaw === "full" ||
+    layoutHintRaw === "half" ||
+    layoutHintRaw === "third" ||
+    layoutHintRaw === "two_third"
+      ? layoutHintRaw
+      : undefined;
+
+  return {
+    id: asString(r.id) ?? asString(r.asset_id) ?? `asset-${idx}`,
+    kind,
+    caption: asString(r.caption),
+    caption_sub: asString(r.caption_sub) ?? asString(r.captionSub),
+    sort_order: Number(r.sort_order ?? r.sortOrder ?? idx),
+    is_cover: asBool(r.is_cover) ?? asBool(r.isCover) ?? asBool(r.cover) ?? false,
+    show_in_gallery: asBool(r.show_in_gallery) ?? asBool(r.showInGallery) ?? true,
+    layout_hint,
+    url: directUrl,
+    media_url: directUrl,
+    public_url: directUrl,
+    urls: {
+      thumb: asString(urlsRaw.thumb) ?? directUrl,
+      medium: asString(urlsRaw.medium) ?? directUrl,
+      large: asString(urlsRaw.large) ?? directUrl,
+    },
+  };
+}
+
+function normalizeProjectDetail(raw: unknown): ProjectDetail {
+  const r = asRecord(raw);
+  const allAssetsRaw =
+    (Array.isArray(r.all_assets) && r.all_assets) ||
+    (Array.isArray(r.allAssets) && r.allAssets) ||
+    (Array.isArray(r.assets) && r.assets) ||
+    (Array.isArray(r.media) && r.media) ||
+    [];
+  const galleryRaw =
+    (Array.isArray(r.gallery) && r.gallery) ||
+    (Array.isArray(r.gallery_assets) && r.gallery_assets) ||
+    (Array.isArray(r.galleryAssets) && r.galleryAssets) ||
+    [];
+
+  const all_assets = allAssetsRaw.map((a, idx) => normalizeAsset(a, idx));
+  const gallery = (galleryRaw.length ? galleryRaw : all_assets)
+    .map((a, idx) => normalizeAsset(a, idx))
+    .filter((a) => a.show_in_gallery !== false);
+
+  const coverFromAsset =
+    all_assets.find((a) => a.is_cover)?.urls?.large ??
+    all_assets.find((a) => a.is_cover)?.urls?.medium ??
+    all_assets.find((a) => a.is_cover)?.urls?.thumb ??
+    gallery[0]?.urls?.large ??
+    gallery[0]?.urls?.medium ??
+    gallery[0]?.urls?.thumb;
+
+  const eventTypesRaw = r.event_types ?? r.eventTypes;
+  const event_types = Array.isArray(eventTypesRaw)
+    ? eventTypesRaw.map((v) => String(v))
+    : typeof eventTypesRaw === "string"
+      ? eventTypesRaw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+
+  const cityName = asString(r.city_name) ?? asString(asRecord(r.city).name);
+  const venueName = asString(r.venue_name) ?? asString(asRecord(r.venue).name);
+
+  return {
+    ...(r as ProjectDetail),
+    id: asString(r.id) ?? "",
+    title: asString(r.title) ?? "Untitled project",
+    city:
+      typeof r.city === "object" && r.city
+        ? (r.city as ProjectDetail["city"])
+        : cityName
+          ? { id: asString(r.city_id) ?? "", name: cityName }
+          : undefined,
+    venue:
+      typeof r.venue === "object" && r.venue
+        ? (r.venue as ProjectDetail["venue"])
+        : venueName
+          ? { id: asString(r.venue_id) ?? "", name: venueName }
+          : undefined,
+    event_types,
+    cover_url: asString(r.cover_url) ?? asString(r.coverUrl) ?? coverFromAsset,
+    gallery,
+    all_assets,
+  };
+}
+
 export type ApiErrorBody = {
-  error?: { code?: string; message?: string };
+  error?: {
+    code?: string;
+    message?: string;
+    details?: Array<{ code?: string; message?: string }>;
+  };
 };
 
 export class ApiError extends Error {
@@ -35,7 +167,7 @@ export class ApiError extends Error {
   }
 }
 
-const FETCH_TIMEOUT_MS = 8000;
+const FETCH_TIMEOUT_MS = 15000;
 const UPLOAD_TIMEOUT_MS = 120000;
 
 function authHeadersMultipart(): HeadersInit {
@@ -62,7 +194,7 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
     return await fetch(url, { ...init, signal: controller.signal });
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
-      throw new ApiError(0, "TIMEOUT", "Backend did not respond in time. Is the API running on port 8080?");
+      throw new ApiError(0, "TIMEOUT", "Backend did not respond in time. Please retry.");
     }
     throw new ApiError(0, "NETWORK_ERROR", "Cannot reach backend API. Start: mvn spring-boot:run in backend project.");
   } finally {
@@ -77,6 +209,16 @@ async function parseError(res: Response): Promise<ApiError> {
     const body = (await res.json()) as ApiErrorBody;
     code = body.error?.code ?? code;
     message = body.error?.message ?? message;
+    const details = body.error?.details ?? [];
+    if (details.length > 0) {
+      const detailsText = details
+        .map((d) => [d.code, d.message].filter(Boolean).join(": "))
+        .filter(Boolean)
+        .join(" | ");
+      if (detailsText) {
+        message = `${message} (${detailsText})`;
+      }
+    }
   } catch {
     /* ignore */
   }
@@ -116,6 +258,32 @@ export type SystemStatus = {
   message: string;
 };
 
+let systemStatusCache: SystemStatus | null = null;
+let systemStatusCacheAt = 0;
+let systemStatusInflight: Promise<SystemStatus> | null = null;
+const SYSTEM_STATUS_CACHE_MS = 60 * 60 * 1000;
+const SYSTEM_STATUS_CACHE_KEY = "atelier_system_status_cache_v1";
+
+function readSystemStatusFromSession(): { payload: SystemStatus; ts: number } | null {
+  try {
+    const raw = sessionStorage.getItem(SYSTEM_STATUS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { payload?: SystemStatus; ts?: number };
+    if (!parsed?.payload || typeof parsed.ts !== "number") return null;
+    return { payload: parsed.payload, ts: parsed.ts };
+  } catch {
+    return null;
+  }
+}
+
+function writeSystemStatusToSession(payload: SystemStatus, ts: number) {
+  try {
+    sessionStorage.setItem(SYSTEM_STATUS_CACHE_KEY, JSON.stringify({ payload, ts }));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export type LoginResponse = {
   accessToken: string;
   refreshToken: string;
@@ -123,10 +291,40 @@ export type LoginResponse = {
   user: { id: string; email: string; fullName: string; role: string };
 };
 
-export async function fetchSystemStatus(): Promise<SystemStatus> {
-  const res = await fetchWithTimeout(`${API_BASE}/system/status`);
-  if (!res.ok) throw new ApiError(res.status, "API_UNREACHABLE", "Cannot reach backend API");
-  return res.json() as Promise<SystemStatus>;
+export async function fetchSystemStatus(
+  options: { force?: boolean } = {},
+): Promise<SystemStatus> {
+  const now = Date.now();
+  if (!options.force && !systemStatusCache) {
+    const cached = readSystemStatusFromSession();
+    if (cached && now - cached.ts < SYSTEM_STATUS_CACHE_MS) {
+      systemStatusCache = cached.payload;
+      systemStatusCacheAt = cached.ts;
+      return cached.payload;
+    }
+  }
+  if (!options.force && systemStatusCache && now - systemStatusCacheAt < SYSTEM_STATUS_CACHE_MS) {
+    return systemStatusCache;
+  }
+  if (!options.force && systemStatusInflight) {
+    return systemStatusInflight;
+  }
+
+  systemStatusInflight = (async () => {
+    const res = await fetchWithTimeout(`${API_BASE}/system/status`);
+    if (!res.ok) throw new ApiError(res.status, "API_UNREACHABLE", "Cannot reach backend API");
+    const payload = (await res.json()) as SystemStatus;
+    systemStatusCache = payload;
+    systemStatusCacheAt = Date.now();
+    writeSystemStatusToSession(payload, systemStatusCacheAt);
+    return payload;
+  })();
+
+  try {
+    return await systemStatusInflight;
+  } finally {
+    systemStatusInflight = null;
+  }
 }
 
 export async function loginApi(email: string, password: string): Promise<LoginResponse> {
@@ -183,6 +381,7 @@ export type ProjectCreateBody = {
 export type ListProjectsParams = {
   status?: "PUBLISHED" | "DRAFT" | "ARCHIVED";
   eventType?: string;
+  mine?: boolean;
   page?: number;
   limit?: number;
   q?: string;
@@ -211,6 +410,7 @@ function toSnakeProjectBody(body: Partial<ProjectCreateBody>): Record<string, un
 export async function listProjectsApi(params: ListProjectsParams = {}): Promise<ProjectListItem[]> {
   const qs = new URLSearchParams();
   qs.set("status", params.status ?? "PUBLISHED");
+  if (params.mine !== undefined) qs.set("mine", String(params.mine));
   if (params.eventType) qs.set("event_type", params.eventType);
   if (params.page) qs.set("page", String(params.page));
   if (params.limit) qs.set("limit", String(params.limit ?? 48));
@@ -230,16 +430,16 @@ export async function listMoodboardApi(params: ListProjectsParams = {}): Promise
   return parseProjectsList(raw);
 }
 
-export async function checkMoodboardApi(projectId: string): Promise<boolean> {
+export async function checkMoodboardApi(projectId: string | number): Promise<boolean> {
   const raw = await apiGet<{ saved?: boolean }>(`/moodboard/items/check/${projectId}`);
   return Boolean(raw.saved);
 }
 
-export async function addToMoodboardApi(projectId: string) {
+export async function addToMoodboardApi(projectId: string | number) {
   return apiPost<{ status: string }>("/moodboard/items", { project_id: projectId });
 }
 
-export async function removeFromMoodboardApi(projectId: string) {
+export async function removeFromMoodboardApi(projectId: string | number) {
   const res = await fetchWithTimeout(`${API_BASE}/moodboard/items/${projectId}`, {
     method: "DELETE",
     headers: authHeaders(),
@@ -269,8 +469,9 @@ export async function fetchProjectStatsApi(): Promise<ProjectStats> {
   return normalizeProjectStats(raw);
 }
 
-export async function fetchProjectDetailApi(id: string): Promise<ProjectDetail> {
-  return apiGet<ProjectDetail>(`/projects/${id}`);
+export async function fetchProjectDetailApi(id: string | number): Promise<ProjectDetail> {
+  const raw = await apiGet<unknown>(`/projects/${id}`);
+  return normalizeProjectDetail(raw);
 }
 
 export async function patchAssetApi(
@@ -281,18 +482,18 @@ export async function patchAssetApi(
 }
 
 export async function createProjectApi(body: ProjectCreateBody) {
-  return apiPost<{ id: string; status: string }>("/projects", toSnakeProjectBody(body));
+  return apiPost<{ id: string | number; status: string }>("/projects", toSnakeProjectBody(body));
 }
 
-export async function updateProjectApi(id: string, body: Partial<ProjectCreateBody>) {
-  return apiPatch<{ id: string; status: string }>(`/projects/${id}`, toSnakeProjectBody(body));
+export async function updateProjectApi(id: string | number, body: Partial<ProjectCreateBody>) {
+  return apiPatch<{ id: string | number; status: string }>(`/projects/${id}`, toSnakeProjectBody(body));
 }
 
-export async function publishProjectApi(id: string) {
-  return apiPost<{ id: string; status: string; published_at: string }>(`/projects/${id}/publish`);
+export async function publishProjectApi(id: string | number) {
+  return apiPost<{ id: string | number; status: string; published_at: string }>(`/projects/${id}/publish`);
 }
 
-export async function deleteProjectApi(id: string) {
+export async function deleteProjectApi(id: string | number) {
   const res = await fetchWithTimeout(`${API_BASE}/projects/${id}`, {
     method: "DELETE",
     headers: authHeaders(),
@@ -307,7 +508,7 @@ export type UploadedAsset = {
 };
 
 export async function uploadProjectAssetsApi(
-  projectId: string,
+  projectId: string | number,
   files: File[],
 ): Promise<UploadedAsset[]> {
   const form = new FormData();
@@ -331,7 +532,7 @@ export async function uploadProjectAssetsApi(
       throw new ApiError(0, "TIMEOUT", "Upload timed out. Try fewer or smaller files.");
     }
     if (e instanceof ApiError) throw e;
-    throw new ApiError(0, "NETWORK_ERROR", "Upload failed — check API on port 8081.");
+    throw new ApiError(0, "NETWORK_ERROR", "Upload failed — backend API is unreachable.");
   } finally {
     clearTimeout(timer);
   }
@@ -400,6 +601,11 @@ export type TeamDashboard = {
   pending_invites: PendingInviteRow[];
 };
 
+let teamDashboardCache: TeamDashboard | null = null;
+let teamDashboardCacheAt = 0;
+let teamDashboardInflight: Promise<TeamDashboard> | null = null;
+const TEAM_DASHBOARD_CACHE_MS = 30 * 1000;
+
 function normalizeTeamDashboard(raw: Record<string, unknown>): TeamDashboard {
   const statsRaw = (raw.stats ?? {}) as Record<string, number>;
   const stats: TeamStats = {
@@ -422,9 +628,30 @@ function normalizeTeamDashboard(raw: Record<string, unknown>): TeamDashboard {
   return { stats, members, pending_invites };
 }
 
-export async function fetchTeamDashboardApi(): Promise<TeamDashboard> {
-  const raw = await apiGet<Record<string, unknown>>("/team");
-  return normalizeTeamDashboard(raw);
+export async function fetchTeamDashboardApi(
+  options: { force?: boolean } = {},
+): Promise<TeamDashboard> {
+  const now = Date.now();
+  if (!options.force && teamDashboardCache && now - teamDashboardCacheAt < TEAM_DASHBOARD_CACHE_MS) {
+    return teamDashboardCache;
+  }
+  if (!options.force && teamDashboardInflight) {
+    return teamDashboardInflight;
+  }
+
+  teamDashboardInflight = (async () => {
+    const raw = await apiGet<Record<string, unknown>>("/team");
+    const normalized = normalizeTeamDashboard(raw);
+    teamDashboardCache = normalized;
+    teamDashboardCacheAt = Date.now();
+    return normalized;
+  })();
+
+  try {
+    return await teamDashboardInflight;
+  } finally {
+    teamDashboardInflight = null;
+  }
 }
 
 export type UpdateTeamMemberBody = {

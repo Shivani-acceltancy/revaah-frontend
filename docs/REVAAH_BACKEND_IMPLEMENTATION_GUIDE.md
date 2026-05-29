@@ -357,7 +357,7 @@ dto/ProjectCardDto.java
 
 ### 8.1 Code changes for `cover_url` (copy-paste guide for API dev)
 
-1. **DB migration** (senior runs): `ALTER TABLE projects ADD COLUMN cover_url VARCHAR(2048) NULL;`
+1. **DB migration** (team runs): `ALTER TABLE projects ADD COLUMN cover_url VARCHAR(2048) NULL;`
 2. **Entity** `Project.java`:
    ```java
    @Column(name = "cover_url", length = 2048)
@@ -455,7 +455,7 @@ npm run dev
 
 ---
 
-## 12. Summary for your senior / PM
+## 12. Summary for your team / PM
 
 | Question | Answer |
 |----------|--------|

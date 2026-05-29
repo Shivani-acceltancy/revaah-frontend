@@ -1,5 +1,5 @@
-import { GALLERY_CARDS, type GalleryCard } from "./atelier";
 import type { GallerySpan, ProjectDetail, ProjectListItem, ProjectStats } from "../types/project";
+import type { GalleryCard } from "./atelier";
 
 const SPANS: GallerySpan[] = ["span-7", "span-5", "span-4", "span-4", "span-4", "span-8", "span-4"];
 
@@ -12,8 +12,16 @@ const EVENT_LABELS: Record<string, string> = {
   ENGAGEMENT: "Engagement",
 };
 
-const PLACEHOLDER_IMAGE =
-  "https://images.unsplash.com/photo-1519225421980-715cb0215aed?w=1200&q=80";
+const DEMO_IMAGE_SNIPPETS = [
+  "images.unsplash.com/photo-1519225421980-715cb0215aed",
+  "images.unsplash.com/photo-1606800052052-a08af7148866",
+];
+
+function isDemoImageUrl(url?: string | null): boolean {
+  if (!url) return false;
+  const normalized = url.toLowerCase();
+  return DEMO_IMAGE_SNIPPETS.some((s) => normalized.includes(s));
+}
 
 function cityName(city: ProjectListItem["city"]): string {
   if (!city) return "";
@@ -47,13 +55,13 @@ export function projectToGalleryCard(item: ProjectListItem, index: number): Gall
   const location = [city, venue].filter(Boolean).join(" · ");
 
   return {
-    id: item.id,
+    id: String(item.id),
     span: item.grid_span ?? SPANS[index % SPANS.length],
-    image: item.cover_url || PLACEHOLDER_IMAGE,
+    image: isDemoImageUrl(item.cover_url) ? "" : (item.cover_url ?? ""),
     city: location || "—",
-    name: item.title,
+    name: item.title || "Untitled project",
     sub: buildSubtitle(item),
-    palette: item.palette?.length ? item.palette : ["#5C1A2B", "#B8893A", "#E8C8B8", "#FAF6F0"],
+    palette: item.palette ?? [],
   };
 }
 
@@ -88,13 +96,6 @@ export function parseProjectsList(raw: unknown): ProjectListItem[] {
   return [];
 }
 
-export function staticGalleryWithIds(): (GalleryCard & { id: string })[] {
-  return GALLERY_CARDS.map((card, i) => ({
-    ...card,
-    id: `static-${i}`,
-  }));
-}
-
 export function detailCity(detail: ProjectDetail): string {
   if (!detail.city) return "";
   return typeof detail.city === "string" ? detail.city : detail.city.name;
@@ -110,7 +111,7 @@ export function detailEventTypes(detail: ProjectDetail): string {
 }
 
 export function detailPalette(detail: ProjectDetail): string[] {
-  if (!detail.palette?.length) return ["#5C1A2B", "#B8893A", "#3E4A2B", "#E8C8B8"];
+  if (!detail.palette?.length) return [];
   return detail.palette.map((p) => (typeof p === "string" ? p : p.hex));
 }
 
@@ -119,4 +120,5 @@ export function detailTags(detail: ProjectDetail): string[] {
   return detail.style_tags.map((t) => (typeof t === "string" ? t : t.name));
 }
 
-export { EVENT_LABELS, PLACEHOLDER_IMAGE };
+export { EVENT_LABELS };
+export { isDemoImageUrl };

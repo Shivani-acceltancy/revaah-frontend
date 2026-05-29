@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   addToMoodboardApi,
   ApiError,
@@ -9,12 +9,12 @@ import {
   removeFromMoodboardApi,
 } from "../../lib/api";
 import {
-  PLACEHOLDER_IMAGE,
   detailCity,
   detailEventTypes,
   detailPalette,
   detailTags,
   detailVenue,
+  isDemoImageUrl,
 } from "../../lib/projects";
 import type { ProjectDetail, ProjectGalleryAsset } from "../../types/project";
 import type { LibraryMode } from "../../hooks/useAtelier";
@@ -28,35 +28,18 @@ type Props = {
   onEditProject: (projectId: string) => void;
 };
 
-const STATIC_DETAIL: ProjectDetail = {
-  id: "static-demo",
-  title: "Of Tigers & Twilight",
-  theme: "Forest Royal",
-  city: "Ranthambore, Rajasthan",
-  venue: "Aman-i-Khás",
-  event_types: ["WEDDING", "MEHENDI", "SANGEET"],
-  guest_count: 380,
-  duration_days: 4,
-  narrative:
-    "A four-day affair built within the tented camp, the mehendi opened to a forest grove dressed in five thousand marigolds and brass diyas suspended on jute. The sangeet, set under a navy canopy embroidered with constellations, ended at dawn. For the phera, a circular mandap of carved teak was placed at the water's edge, surrounded by hand-painted screens depicting the Ranthambore wilderness.",
-  style_tags: [
-    "Floral cascade",
-    "Brass lanterns",
-    "Forest canopy",
-    "Tiger motif",
-    "Heritage textiles",
-    "Live oud",
-  ],
-  credits: {
-    decor_lead: "Team member",
-    florals: "Studio Verdure",
-    lighting: "Atelier Lumière",
-    photography: "The Rabbit Hole Co.",
-  },
+const EMPTY_DETAIL: ProjectDetail = {
+  id: "",
+  title: "Project",
+  event_types: [],
+  palette: [],
+  style_tags: [],
+  gallery: [],
+  all_assets: [],
 };
 
 function assetUrl(a: ProjectGalleryAsset): string {
-  return a.urls?.large ?? a.urls?.medium ?? a.urls?.thumb ?? PLACEHOLDER_IMAGE;
+  return a.urls?.large ?? a.urls?.medium ?? a.urls?.thumb ?? a.url ?? a.media_url ?? a.public_url ?? "";
 }
 
 export default function ProjectView({
@@ -68,7 +51,7 @@ export default function ProjectView({
   onOpenMoodboard,
   onEditProject,
 }: Props) {
-  const [detail, setDetail] = useState<ProjectDetail>(STATIC_DETAIL);
+  const [detail, setDetail] = useState<ProjectDetail>(EMPTY_DETAIL);
   const [loading, setLoading] = useState(false);
   const [fromApi, setFromApi] = useState(false);
   const [savingMoodboard, setSavingMoodboard] = useState(false);
@@ -76,39 +59,62 @@ export default function ProjectView({
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [updatingAsset, setUpdatingAsset] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const requestSeq = useRef(0);
+  const [resolvedProjectId, setResolvedProjectId] = useState<string | null>(null);
 
-  const loadDetail = async (id: string) => {
+  const loadDetail = async (id: string, seq: number) => {
     const d = await fetchProjectDetailApi(id);
+    if (seq !== requestSeq.current) return;
     setDetail(d);
+    setResolvedProjectId(String(d.id));
     setFromApi(true);
     const saved =
       d.in_moodboard === true ||
       (d as { inMoodboard?: boolean }).inMoodboard === true ||
-      (await checkMoodboardApi(id).catch(() => false));
+      (await checkMoodboardApi(String(d.id)).catch(() => false));
+    if (seq !== requestSeq.current) return;
     setInMoodboard(saved);
     const all = d.all_assets?.length ? d.all_assets : d.gallery ?? [];
-    setSelectedAssetId((curr) => curr ?? all[0]?.id ?? null);
+    setSelectedAssetId(all[0]?.id ?? null);
   };
 
   useEffect(() => {
-    if (!projectId || projectId.startsWith("static-")) {
-      setDetail(STATIC_DETAIL);
+    requestSeq.current += 1;
+    const seq = requestSeq.current;
+    if (!projectId) {
+      setDetail(EMPTY_DETAIL);
       setFromApi(false);
       setInMoodboard(false);
+      setResolvedProjectId(null);
+      setSelectedAssetId(null);
+      setLoadError("Project not found");
       return;
     }
 
+    setDetail(EMPTY_DETAIL);
+    setFromApi(false);
+    setInMoodboard(false);
+    setResolvedProjectId(null);
+    setSelectedAssetId(null);
+    setLoadError(null);
     setLoading(true);
-    loadDetail(projectId)
+    loadDetail(projectId, seq)
       .catch((e) => {
-        setDetail(STATIC_DETAIL);
+        if (seq !== requestSeq.current) return;
+        setDetail(EMPTY_DETAIL);
         setFromApi(false);
+        setResolvedProjectId(null);
         setSelectedAssetId(null);
         if (e instanceof ApiError && e.status === 404) {
-          setDetail({ ...STATIC_DETAIL, title: "Project not found" });
+          setLoadError("Project not found");
+        } else {
+          setLoadError(e instanceof ApiError ? e.message : "Could not load project");
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (seq === requestSeq.current) setLoading(false);
+      });
   }, [projectId]);
 
   const city = detailCity(detail);
@@ -120,7 +126,7 @@ export default function ProjectView({
   const visibleAssets = detail.gallery ?? allAssets.filter((a) => a.show_in_gallery !== false);
   const previewAssets = visibleAssets.slice(0, 7);
   const extraCount = Math.max(visibleAssets.length - 7, 0);
-  const heroImage = detail.cover_url ?? assetUrl(visibleAssets[0] ?? ({} as ProjectGalleryAsset));
+  const heroImage = isDemoImageUrl(detail.cover_url) ? "" : (detail.cover_url ?? "");
   const selectedAsset = allAssets.find((a) => a.id === selectedAssetId) ?? allAssets[0] ?? null;
 
   const credits = detail.credits;
@@ -136,7 +142,7 @@ export default function ProjectView({
     : null;
 
   const addMoodboard = async () => {
-    if (!projectId || projectId.startsWith("static-")) {
+    if (!resolvedProjectId) {
       alert("Only saved projects can be added to moodboard.");
       return;
     }
@@ -146,7 +152,7 @@ export default function ProjectView({
     }
     setSavingMoodboard(true);
     try {
-      await addToMoodboardApi(projectId);
+      await addToMoodboardApi(resolvedProjectId);
       setInMoodboard(true);
       onMoodboardChanged();
     } catch (e) {
@@ -165,11 +171,11 @@ export default function ProjectView({
   };
 
   const setCover = async (assetId: string) => {
-    if (!projectId || projectId.startsWith("static-")) return;
+    if (!resolvedProjectId || !projectId) return;
     setUpdatingAsset(true);
     try {
       await patchAssetApi(assetId, { is_cover: true });
-      await loadDetail(projectId);
+      await loadDetail(projectId, requestSeq.current);
       onMoodboardChanged();
     } catch (e) {
       alert(e instanceof ApiError ? e.message : "Could not set cover");
@@ -179,11 +185,11 @@ export default function ProjectView({
   };
 
   const toggleGallery = async (asset: ProjectGalleryAsset) => {
-    if (!projectId || projectId.startsWith("static-")) return;
+    if (!resolvedProjectId || !projectId) return;
     setUpdatingAsset(true);
     try {
       await patchAssetApi(asset.id, { show_in_gallery: !(asset.show_in_gallery !== false) });
-      await loadDetail(projectId);
+      await loadDetail(projectId, requestSeq.current);
     } catch (e) {
       alert(e instanceof ApiError ? e.message : "Could not update gallery visibility");
     } finally {
@@ -192,12 +198,12 @@ export default function ProjectView({
   };
 
   const removeMoodboard = async () => {
-    if (!projectId || projectId.startsWith("static-")) return;
+    if (!resolvedProjectId) return;
     if (!window.confirm("Remove this project from your moodboard?")) return;
     if (!window.confirm("Please confirm again: remove from moodboard?")) return;
     setSavingMoodboard(true);
     try {
-      await removeFromMoodboardApi(projectId);
+      await removeFromMoodboardApi(resolvedProjectId);
       setInMoodboard(false);
       onMoodboardChanged();
     } catch (e) {
@@ -208,11 +214,11 @@ export default function ProjectView({
   };
 
   const deleteProject = async () => {
-    if (!projectId || projectId.startsWith("static-")) return;
+    if (!resolvedProjectId) return;
     if (!window.confirm("Delete this project permanently?")) return;
     if (!window.confirm("This cannot be undone. Confirm delete again?")) return;
     try {
-      await deleteProjectApi(projectId);
+      await deleteProjectApi(resolvedProjectId);
       onMoodboardChanged();
       onBackFromProject();
     } catch (e) {
@@ -220,11 +226,30 @@ export default function ProjectView({
     }
   };
 
+  const showAtelierActionsOnly = originMode === "atelier";
+  const showProjectAdminActions = originMode === "projects" && Boolean(detail.can_edit) && Boolean(resolvedProjectId);
+  const showMoodboardRemoveAction = originMode === "moodboard" && inMoodboard && Boolean(resolvedProjectId);
+
+  if (loading) {
+    return (
+      <section id="view-project" className="view active">
+        <div className="save-toast">Loading project…</div>
+      </section>
+    );
+  }
+
+  if (!fromApi) {
+    return (
+      <section id="view-project" className="view active">
+        <div className="save-toast save-toast--err">{loadError ?? "Project not found"}</div>
+      </section>
+    );
+  }
+
   return (
     <section id="view-project" className="view active">
-      {loading && <div className="save-toast">Loading project…</div>}
-
-      <div className="pd-hero" style={{ backgroundImage: `url('${heroImage}')` }}>
+      <div className={`pd-hero${heroImage ? "" : " pd-hero-empty"}`} style={heroImage ? { backgroundImage: `url('${heroImage}')` } : undefined}>
+        {!heroImage && <div className="pd-hero-empty-msg">No cover image uploaded yet</div>}
         <a
           className="pd-back"
           href="#"
@@ -276,16 +301,18 @@ export default function ProjectView({
                 <dd className="serif">{detail.theme}</dd>
               </div>
             )}
-            <div>
-              <dt>Palette</dt>
-              <dd>
-                <div className="palette">
-                  {palette.map((c) => (
-                    <span key={c} style={{ background: c }} />
-                  ))}
-                </div>
-              </dd>
-            </div>
+            {palette.length > 0 && (
+              <div>
+                <dt>Palette</dt>
+                <dd>
+                  <div className="palette">
+                    {palette.map((c) => (
+                      <span key={c} style={{ background: c }} />
+                    ))}
+                  </div>
+                </dd>
+              </div>
+            )}
             {tags.length > 0 && (
               <div>
                 <dt>Style Tags</dt>
@@ -327,19 +354,19 @@ export default function ProjectView({
             <button type="button" className="btn-outline">
               Find similar
             </button>
-            {detail.can_edit && projectId && !projectId.startsWith("static-") && (
-              <button type="button" className="btn-outline" onClick={() => onEditProject(projectId)}>
+            {!showAtelierActionsOnly && showProjectAdminActions && (
+              <button type="button" className="btn-outline" onClick={() => resolvedProjectId && onEditProject(String(resolvedProjectId))}>
                 Update project
               </button>
             )}
-            {detail.can_delete && projectId && !projectId.startsWith("static-") && (
+            {!showAtelierActionsOnly && originMode === "projects" && detail.can_delete && resolvedProjectId && (
               <button type="button" className="btn-outline" onClick={() => void deleteProject()}>
                 Delete project
               </button>
             )}
-            {inMoodboard && projectId && !projectId.startsWith("static-") && (
+            {!showAtelierActionsOnly && showMoodboardRemoveAction && (
               <button type="button" className="btn-outline" onClick={() => void removeMoodboard()} disabled={savingMoodboard}>
-                {originMode === "moodboard" ? "Remove from moodboard" : "Remove project"}
+                Remove this moodboard
               </button>
             )}
           </div>

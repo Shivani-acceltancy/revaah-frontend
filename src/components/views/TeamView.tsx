@@ -64,11 +64,11 @@ export default function TeamView({ onNavigate, onShowLibrary, onLogout, onOpenIn
   const [editName, setEditName] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     setLoading(true);
     setError(null);
     try {
-      setData(await fetchTeamDashboardApi());
+      setData(await fetchTeamDashboardApi({ force }));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not load team");
     } finally {
@@ -97,7 +97,7 @@ export default function TeamView({ onNavigate, onShowLibrary, onLogout, onOpenIn
         department: editDept || undefined,
       });
       setEditing(null);
-      await load();
+      await load(true);
     } catch (e) {
       alert(e instanceof ApiError ? e.message : "Update failed");
     } finally {
@@ -110,7 +110,7 @@ export default function TeamView({ onNavigate, onShowLibrary, onLogout, onOpenIn
     setBusy(true);
     try {
       await suspendTeamMemberApi(m.id);
-      await load();
+      await load(true);
     } catch (e) {
       alert(e instanceof ApiError ? e.message : "Suspend failed");
     } finally {
@@ -131,7 +131,7 @@ export default function TeamView({ onNavigate, onShowLibrary, onLogout, onOpenIn
               <h1 className="serif">The atelier team.</h1>
             </div>
             <div className="right">
-              <button type="button" className="btn-outline" onClick={() => void load()} disabled={loading}>
+              <button type="button" className="btn-outline" onClick={() => void load(true)} disabled={loading}>
                 Refresh
               </button>
               <button type="button" className="btn-ink" onClick={onOpenInvite}>
@@ -261,7 +261,7 @@ export default function TeamView({ onNavigate, onShowLibrary, onLogout, onOpenIn
                       if (!confirm("Revoke this invitation?")) return;
                       try {
                         await revokeInviteApi(inv.id);
-                        await load();
+                        await load(true);
                       } catch (e) {
                         alert(e instanceof ApiError ? e.message : "Revoke failed");
                       }

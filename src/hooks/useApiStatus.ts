@@ -1,37 +1,59 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, fetchSystemStatus, type SystemStatus } from "../lib/api";
 
 export function useApiStatus() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [apiConnected, setApiConnected] = useState(false);
   const [loading, setLoading] = useState(true);
+  const consecutiveFailuresRef = useRef(0);
+  const hadSuccessfulPingRef = useRef(false);
+  const hasLoadedOnceRef = useRef(false);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) {
+      setLoading(true);
+    }
     try {
       const s = await fetchSystemStatus();
       setStatus(s);
       setApiConnected(true);
+      consecutiveFailuresRef.current = 0;
+      hadSuccessfulPingRef.current = true;
     } catch (e) {
-      setApiConnected(false);
-      setStatus({
-        api: "down",
-        database_ready: false,
-        database_status: "API_UNREACHABLE",
-        message:
-          e instanceof ApiError
-            ? e.message
-            : "Backend not running. Start API on http://localhost:8081 (see .env VITE_API_PROXY_TARGET)",
-      });
+      const nextFailures = consecutiveFailuresRef.current + 1;
+      consecutiveFailuresRef.current = nextFailures;
+
+      // Avoid noisy "API offline" flashes on brief proxy/network hiccups.
+      if (hadSuccessfulPingRef.current && nextFailures < 3) {
+        setApiConnected(true);
+        setStatus((prev) =>
+          prev
+            ? {
+                ...prev,
+                message: "Connection is slow. Retrying…",
+              }
+            : prev,
+        );
+      } else {
+        setApiConnected(false);
+        setStatus({
+          api: "down",
+          database_ready: false,
+          database_status: "API_UNREACHABLE",
+          message:
+            e instanceof ApiError
+              ? e.message
+              : "Backend not running. Start API and retry.",
+        });
+      }
     } finally {
+      hasLoadedOnceRef.current = true;
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 15000);
-    return () => clearInterval(id);
   }, [refresh]);
 
   return { status, apiConnected, loading, refresh };

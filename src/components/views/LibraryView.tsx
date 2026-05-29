@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, fetchProjectStatsApi, listMoodboardApi, listProjectsApi } from "../../lib/api";
-import { COLLECTIONS } from "../../lib/atelier";
 import type { GalleryCard } from "../../lib/atelier";
-import { projectToGalleryCard, staticGalleryWithIds } from "../../lib/projects";
+import { projectToGalleryCard } from "../../lib/projects";
 import type { LibraryMode, SessionUser } from "../../hooks/useAtelier";
 import type { AtelierView } from "../../lib/atelier";
 import TopBar from "../layout/TopBar";
@@ -44,11 +43,19 @@ export default function LibraryView({
   currentUser,
 }: Props) {
   const [activeFilter, setActiveFilter] = useState<(typeof FILTERS)[number]>("All");
-  const [cards, setCards] = useState<GalleryCardWithId[]>(staticGalleryWithIds());
-  const [usingApi, setUsingApi] = useState(false);
+  const [atelierTab, setAtelierTab] = useState<"projects" | "moodboard">("projects");
+  const [cards, setCards] = useState<GalleryCardWithId[]>([]);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [stats, setStats] = useState({ projects: 412, cities: 31, venues: 87, assets: 24000 });
+  const showHero = libraryMode === "atelier";
+  const activeListMode = showHero ? atelierTab : libraryMode;
+
+  useEffect(() => {
+    if (libraryMode === "atelier") {
+      setAtelierTab("projects");
+    }
+  }, [libraryMode]);
 
   const loadProjects = useCallback(async () => {
     setLoading(true);
@@ -56,30 +63,21 @@ export default function LibraryView({
     try {
       const eventType = FILTER_TO_API[activeFilter];
       const status = activeFilter === "Draft" ? "DRAFT" : "PUBLISHED";
+      const mine = libraryMode === "projects" && currentUser?.role !== "OWNER";
       const items =
-        libraryMode === "moodboard"
+        activeListMode === "moodboard"
           ? await listMoodboardApi({ eventType })
-          : await listProjectsApi({ status, eventType });
-      if (items.length > 0) {
-        setCards(items.map((item, i) => projectToGalleryCard(item, i)));
-        setUsingApi(true);
-      } else if (databaseReady) {
-        setCards([]);
-        setUsingApi(true);
-      } else {
-        setCards(staticGalleryWithIds());
-        setUsingApi(false);
-      }
+          : await listProjectsApi({ status, eventType, mine });
+      setCards(items.map((item, i) => projectToGalleryCard(item, i)));
     } catch (e) {
-      setCards(staticGalleryWithIds());
-      setUsingApi(false);
+      setCards([]);
       if (e instanceof ApiError && !e.isDatabaseNotReady) {
         setListError(e.message);
       }
     } finally {
       setLoading(false);
     }
-  }, [activeFilter, databaseReady, libraryMode]);
+  }, [activeFilter, activeListMode, currentUser?.role, libraryMode]);
 
   useEffect(() => {
     void loadProjects();
@@ -91,8 +89,6 @@ export default function LibraryView({
       .then(setStats)
       .catch(() => {});
   }, [databaseReady, projectsRefreshKey]);
-
-  const showHero = libraryMode === "atelier";
 
   return (
     <section id="view-library" className="view active">
@@ -141,11 +137,11 @@ export default function LibraryView({
             </div>
           </div>
           <div className="hero-right">
-            <div className="hero-img a">
-              <div className="tag">Udaipur · Royal</div>
+            <div className="hero-img a hero-img-empty">
+              <div className="tag">No featured project image</div>
             </div>
-            <div className="hero-img b">
-              <div className="tag">Jaipur · Mehendi</div>
+            <div className="hero-img b hero-img-empty">
+              <div className="tag">Upload a cover to feature here</div>
             </div>
           </div>
         </section>
@@ -167,15 +163,15 @@ export default function LibraryView({
         <div className="view-toggle">
           <button
             type="button"
-            className={libraryMode !== "moodboard" ? "on" : ""}
-            onClick={() => onShowLibrary("projects")}
+            className={activeListMode !== "moodboard" ? "on" : ""}
+            onClick={() => (showHero ? setAtelierTab("projects") : onShowLibrary("projects"))}
           >
             Projects
           </button>
           <button
             type="button"
-            className={libraryMode === "moodboard" ? "on" : ""}
-            onClick={() => onShowLibrary("moodboard")}
+            className={activeListMode === "moodboard" ? "on" : ""}
+            onClick={() => (showHero ? setAtelierTab("moodboard") : onShowLibrary("moodboard"))}
           >
             Moodboard
           </button>
@@ -184,15 +180,15 @@ export default function LibraryView({
 
       {loading && (
         <div className="save-toast">
-          Loading {libraryMode === "moodboard" ? "moodboard" : "projects"}…
+          Loading {activeListMode === "moodboard" ? "moodboard" : "projects"}…
         </div>
       )}
       {listError && <div className="save-toast save-toast--err">{listError}</div>}
       {!loading && cards.length === 0 && (
         <div className="save-toast">
-          {libraryMode === "moodboard"
-            ? "No projects in moodboard yet. Open a project and click Add to moodboard."
-            : "No published projects yet. Use Admin → Upload event to create and publish one."}
+          {activeListMode === "moodboard"
+            ? "No moodboard yet. Add moodboard."
+            : "No projects yet. Create new project."}
         </div>
       )}
 
@@ -206,7 +202,11 @@ export default function LibraryView({
             role="button"
             tabIndex={0}
           >
-            <div className="img" style={{ backgroundImage: `url('${card.image}')` }} />
+            {card.image ? (
+              <div className="img" style={{ backgroundImage: `url('${card.image}')` }} />
+            ) : (
+              <div className="img img-empty">No cover image uploaded yet</div>
+            )}
             <div className="meta">
               <div className="city">{card.city}</div>
               <div className="name serif">{card.name}</div>
@@ -220,27 +220,6 @@ export default function LibraryView({
           </div>
         ))}
       </section>
-
-      {showHero && (
-        <>
-          <div className="section-head">
-            <h2 className="serif">Curated worlds.</h2>
-            <div className="right">For tonight&apos;s meeting</div>
-          </div>
-          <section className="collections">
-            {COLLECTIONS.map((c) => (
-              <div key={c.title} className="collection">
-                <div className="img" style={{ backgroundImage: `url('${c.image}')` }} />
-                <div className="label">
-                  <div className="eyebrow">{c.label}</div>
-                  <h3 className="serif">{c.title}</h3>
-                  <div className="count">{c.count}</div>
-                </div>
-              </div>
-            ))}
-          </section>
-        </>
-      )}
 
       <div style={{ height: 120 }} />
     </section>

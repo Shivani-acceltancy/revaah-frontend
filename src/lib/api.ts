@@ -436,7 +436,10 @@ export async function checkMoodboardApi(projectId: string | number): Promise<boo
 }
 
 export async function addToMoodboardApi(projectId: string | number) {
-  return apiPost<{ status: string }>("/moodboard/items", { project_id: projectId });
+  const numericId = typeof projectId === "number" ? projectId : Number(projectId);
+  return apiPost<{ status: string }>("/moodboard/items", {
+    project_id: Number.isNaN(numericId) ? projectId : numericId,
+  });
 }
 
 export async function removeFromMoodboardApi(projectId: string | number) {

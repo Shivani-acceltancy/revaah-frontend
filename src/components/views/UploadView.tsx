@@ -155,7 +155,6 @@ export default function UploadView({
     { id: number; who: string; what: string; at: Date }[]
   >([]);
   const actorName = currentUser?.fullName?.trim() || currentUser?.email?.trim() || "User";
-  const shortProjectId = (id: unknown) => String(id ?? "").slice(0, 8);
   const safePreviewUrl = (file: File) => {
     try {
       return file.type.startsWith("image/") ? URL.createObjectURL(file) : "";
@@ -297,7 +296,7 @@ export default function UploadView({
     const created = await createProjectApi(formBody());
     const createdId = created.id;
     setProjectId(createdId);
-    setSaveMsg({ type: "ok", text: `Draft saved (${shortProjectId(created.id)}…) — uploading files…` });
+    setSaveMsg({ type: "ok", text: `Draft saved (id: ${created.id}) — uploading files…` });
     setActivities((prev) => [
       {
         id: Date.now(),
@@ -948,7 +947,7 @@ export default function UploadView({
                 <div className="left">
                   <span className="status-dot" />
                   <span className="status-txt">
-                    {projectId ? `Draft · ${shortProjectId(projectId)}…` : "Draft · not saved yet"}
+                    {projectId ? `Draft · ${projectId}` : "Draft · not saved yet"}
                     {previews.filter((p) => p.status === "done").length > 0 &&
                       ` · ${previews.filter((p) => p.status === "done").length} uploaded`}
                   </span>

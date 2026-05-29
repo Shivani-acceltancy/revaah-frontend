@@ -137,6 +137,15 @@ function normalizeProjectDetail(raw: unknown): ProjectDetail {
     cover_url: asString(r.cover_url) ?? asString(r.coverUrl) ?? coverFromAsset,
     gallery,
     all_assets,
+    in_moodboard: Boolean(r.in_moodboard ?? r.inMoodboard),
+    can_edit: Boolean(r.can_edit ?? r.canEdit),
+    can_delete: Boolean(r.can_delete ?? r.canDelete),
+    can_share: Boolean(r.can_share ?? r.canShare),
+    can_add_to_moodboard: Boolean(r.can_add_to_moodboard ?? r.canAddToMoodboard),
+    can_remove_from_moodboard: Boolean(r.can_remove_from_moodboard ?? r.canRemoveFromMoodboard),
+    share_requires_approval: Boolean(r.share_requires_approval ?? r.shareRequiresApproval),
+    share_request_pending: Boolean(r.share_request_pending ?? r.shareRequestPending),
+    share_request_approved: Boolean(r.share_request_approved ?? r.shareRequestApproved),
   };
 }
 
@@ -168,6 +177,7 @@ export class ApiError extends Error {
 }
 
 const FETCH_TIMEOUT_MS = 15000;
+const PROJECT_DETAIL_TIMEOUT_MS = 45000;
 const UPLOAD_TIMEOUT_MS = 120000;
 
 function authHeadersMultipart(): HeadersInit {
@@ -187,9 +197,13 @@ function authHeaders(): HeadersInit {
   return headers;
 }
 
-async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  init?: RequestInit,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } catch (e) {
@@ -335,6 +349,17 @@ export async function uiPreviewLoginApi(): Promise<LoginResponse> {
   return apiPost<LoginResponse>("/auth/ui-preview");
 }
 
+export type MeResponse = {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+};
+
+export async function fetchMeApi(): Promise<MeResponse> {
+  return apiGet<MeResponse>("/auth/me");
+}
+
 export type InviteVerifyResponse = {
   valid: boolean;
   reason?: string | null;
@@ -473,7 +498,13 @@ export async function fetchProjectStatsApi(): Promise<ProjectStats> {
 }
 
 export async function fetchProjectDetailApi(id: string | number): Promise<ProjectDetail> {
-  const raw = await apiGet<unknown>(`/projects/${id}`);
+  const res = await fetchWithTimeout(
+    `${API_BASE}/projects/${id}`,
+    { headers: authHeaders() },
+    PROJECT_DETAIL_TIMEOUT_MS,
+  );
+  if (!res.ok) throw await parseError(res);
+  const raw = await res.json();
   return normalizeProjectDetail(raw);
 }
 
@@ -503,6 +534,20 @@ export async function deleteProjectApi(id: string | number) {
   });
   if (!res.ok) throw await parseError(res);
   return res.json() as Promise<{ status: string }>;
+}
+
+export async function requestShareLinkApi(projectId: string | number) {
+  return apiPost<{ status: string; id?: number }>(`/projects/${projectId}/share-request`, {});
+}
+
+export async function listShareRequestsApi() {
+  return apiGet<Array<{ id: number; project_id: number; project_title?: string; requested_by: string; created_at: string }>>(
+    "/team/share-requests",
+  );
+}
+
+export async function approveShareRequestApi(requestId: number) {
+  return apiPost<{ status: string }>(`/team/share-requests/${requestId}/approve`, {});
 }
 
 export type UploadedAsset = {

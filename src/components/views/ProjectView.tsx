@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import {
   addToMoodboardApi,
   ApiError,
-  checkMoodboardApi,
-  deleteProjectApi,
   fetchProjectDetailApi,
   patchAssetApi,
   removeFromMoodboardApi,
+  requestShareLinkApi,
+  deleteProjectApi,
 } from "../../lib/api";
 import {
   detailCity,
@@ -17,12 +17,18 @@ import {
   isDemoImageUrl,
 } from "../../lib/projects";
 import type { ProjectDetail, ProjectGalleryAsset } from "../../types/project";
-import type { LibraryMode } from "../../hooks/useAtelier";
+import type { LibraryMode, SessionUser } from "../../hooks/useAtelier";
 type Props = {
   projectId: string | null;
   originMode?: LibraryMode;
+  currentUser?: SessionUser | null;
   onBackFromProject: () => void;
-  onOpenShare: () => void;
+  onOpenShare: (project: {
+    title: string;
+    imageCount: number;
+    videoCount: number;
+    projectId?: string;
+  }) => void;
   onMoodboardChanged: () => void;
   onOpenMoodboard: () => void;
   onEditProject: (projectId: string) => void;
@@ -44,7 +50,8 @@ function assetUrl(a: ProjectGalleryAsset): string {
 
 export default function ProjectView({
   projectId,
-  originMode = "projects",
+  originMode = "atelier",
+  currentUser: _currentUser,
   onBackFromProject,
   onOpenShare,
   onMoodboardChanged,
@@ -69,12 +76,7 @@ export default function ProjectView({
     setDetail(d);
     setResolvedProjectId(String(d.id));
     setFromApi(true);
-    const saved =
-      d.in_moodboard === true ||
-      (d as { inMoodboard?: boolean }).inMoodboard === true ||
-      (await checkMoodboardApi(String(d.id)).catch(() => false));
-    if (seq !== requestSeq.current) return;
-    setInMoodboard(saved);
+    setInMoodboard(Boolean(d.in_moodboard));
     const all = d.all_assets?.length ? d.all_assets : d.gallery ?? [];
     setSelectedAssetId(all[0]?.id ?? null);
   };
@@ -146,8 +148,8 @@ export default function ProjectView({
       alert("Only saved projects can be added to moodboard.");
       return;
     }
-    if (inMoodboard) {
-      onOpenMoodboard();
+    if (inMoodboard || detail.can_add_to_moodboard === false) {
+      if (inMoodboard) onOpenMoodboard();
       return;
     }
     setSavingMoodboard(true);
@@ -226,9 +228,45 @@ export default function ProjectView({
     }
   };
 
-  const showAtelierActionsOnly = originMode === "atelier";
-  const showProjectAdminActions = originMode === "projects" && Boolean(detail.can_edit) && Boolean(resolvedProjectId);
-  const showMoodboardRemoveAction = originMode === "moodboard" && inMoodboard && Boolean(resolvedProjectId);
+  const requestShareApproval = async () => {
+    if (!resolvedProjectId) return;
+    try {
+      await requestShareLinkApi(resolvedProjectId);
+      await loadDetail(String(resolvedProjectId), requestSeq.current);
+      alert("Share link request sent to admin for approval.");
+    } catch (e) {
+      alert(e instanceof ApiError ? e.message : "Could not request share link");
+    }
+  };
+
+  const handleShareClick = () => {
+    if (detail.can_share || detail.share_request_approved) {
+      onOpenShare({
+        title: detail.title,
+        imageCount: allAssets.filter((a) => a.kind !== "VIDEO").length,
+        videoCount: allAssets.filter((a) => a.kind === "VIDEO").length,
+        projectId: resolvedProjectId ?? undefined,
+      });
+      return;
+    }
+    if (detail.share_requires_approval && !detail.share_request_pending) {
+      void requestShareApproval();
+    }
+  };
+
+  const backLabel = originMode === "moodboard" ? "moodboard" : "atelier";
+  const showShareButton = Boolean(detail.can_share || detail.share_request_approved || detail.share_requires_approval);
+  const shareButtonLabel = detail.share_request_pending
+    ? "Approval pending"
+    : detail.share_request_approved || detail.can_share
+      ? "Generate client link"
+      : "Request link approval";
+  const shareDisabled = Boolean(detail.share_request_pending);
+  const showMoodboardButton = detail.can_add_to_moodboard !== false || inMoodboard;
+  const showEditActions = Boolean(detail.can_edit && resolvedProjectId);
+  const showDeleteAction = Boolean(detail.can_delete && resolvedProjectId);
+  const showMoodboardRemoveAction =
+    originMode === "moodboard" && Boolean(detail.can_remove_from_moodboard) && inMoodboard;
 
   if (loading) {
     return (
@@ -258,7 +296,7 @@ export default function ProjectView({
             onBackFromProject();
           }}
         >
-          ← Back to {fromApi ? "projects" : "atelier"}
+          ← Back to {backLabel}
         </a>
         <div className="pd-title-wrap">
           <div className="eyebrow">
@@ -336,37 +374,46 @@ export default function ProjectView({
           )}
           {creditLine && <p>{creditLine}</p>}
           <div className="pd-actions">
-            <button type="button" className="btn-ink" onClick={onOpenShare}>
-              Generate client link
-            </button>
-            <button
-              type="button"
-              className={`btn-outline${inMoodboard ? " on" : ""}`}
-              onClick={() => void addMoodboard()}
-              disabled={savingMoodboard}
-            >
-              {savingMoodboard
-                ? "Saving…"
-                : inMoodboard
-                  ? "Added to moodboard"
-                  : "Add to moodboard"}
-            </button>
+            {showShareButton && (
+              <button
+                type="button"
+                className="btn-ink"
+                onClick={handleShareClick}
+                disabled={shareDisabled}
+              >
+                {shareButtonLabel}
+              </button>
+            )}
+            {showMoodboardButton && (
+              <button
+                type="button"
+                className={`btn-outline${inMoodboard ? " on" : ""}`}
+                onClick={() => void addMoodboard()}
+                disabled={savingMoodboard || (inMoodboard && detail.can_add_to_moodboard === false)}
+              >
+                {savingMoodboard
+                  ? "Saving…"
+                  : inMoodboard
+                    ? "Added to moodboard"
+                    : "Add to moodboard"}
+              </button>
+            )}
             <button type="button" className="btn-outline">
               Find similar
             </button>
-            {!showAtelierActionsOnly && showProjectAdminActions && (
+            {showEditActions && (
               <button type="button" className="btn-outline" onClick={() => resolvedProjectId && onEditProject(String(resolvedProjectId))}>
                 Update project
               </button>
             )}
-            {!showAtelierActionsOnly && originMode === "projects" && detail.can_delete && resolvedProjectId && (
+            {showDeleteAction && (
               <button type="button" className="btn-outline" onClick={() => void deleteProject()}>
                 Delete project
               </button>
             )}
-            {!showAtelierActionsOnly && showMoodboardRemoveAction && (
+            {showMoodboardRemoveAction && (
               <button type="button" className="btn-outline" onClick={() => void removeMoodboard()} disabled={savingMoodboard}>
-                Remove this moodboard
+                Remove from moodboard
               </button>
             )}
           </div>
@@ -437,22 +484,26 @@ export default function ProjectView({
                       <img src={assetUrl(selectedAsset)} alt="Project media" />
                     )}
                     <div className="media-actions">
-                      <button
-                        type="button"
-                        className={`btn-outline ${selectedAsset.is_cover ? "on" : ""}`}
-                        disabled={updatingAsset}
-                        onClick={() => void setCover(selectedAsset.id)}
-                      >
-                        {selectedAsset.is_cover ? "Cover selected" : "Set as cover"}
-                      </button>
-                      <button
-                        type="button"
-                        className={`btn-outline ${selectedAsset.show_in_gallery !== false ? "on" : ""}`}
-                        disabled={updatingAsset}
-                        onClick={() => void toggleGallery(selectedAsset)}
-                      >
-                        {selectedAsset.show_in_gallery !== false ? "Shown in gallery" : "Show in gallery"}
-                      </button>
+                      {detail.can_edit && (
+                        <>
+                          <button
+                            type="button"
+                            className={`btn-outline ${selectedAsset.is_cover ? "on" : ""}`}
+                            disabled={updatingAsset}
+                            onClick={() => void setCover(selectedAsset.id)}
+                          >
+                            {selectedAsset.is_cover ? "Cover selected" : "Set as cover"}
+                          </button>
+                          <button
+                            type="button"
+                            className={`btn-outline ${selectedAsset.show_in_gallery !== false ? "on" : ""}`}
+                            disabled={updatingAsset}
+                            onClick={() => void toggleGallery(selectedAsset)}
+                          >
+                            {selectedAsset.show_in_gallery !== false ? "Shown in gallery" : "Show in gallery"}
+                          </button>
+                        </>
+                      )}
                     </div>
                   </>
                 ) : (

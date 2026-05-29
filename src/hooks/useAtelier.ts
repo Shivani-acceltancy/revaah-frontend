@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ApiError,
+  fetchMeApi,
   loginApi,
   uiPreviewLoginApi,
 } from "../lib/api";
+import type { ShareProjectContext } from "../components/modals/ShareModal";
 import { type AtelierView, STORAGE_KEY } from "../lib/atelier";
+import { canCreateProjects, isOwner } from "../lib/roles";
 
 export type LibraryMode = "atelier" | "projects" | "moodboard";
 export type SessionUser = { id: string; email: string; fullName: string; role: string };
@@ -14,10 +17,27 @@ function readStoredUser(): SessionUser | null {
   try {
     const raw = sessionStorage.getItem(USER_STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as SessionUser;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      id: String(parsed.id ?? ""),
+      email: String(parsed.email ?? ""),
+      fullName: String(parsed.fullName ?? parsed.full_name ?? ""),
+      role: String(parsed.role ?? "MEMBER").toUpperCase().replace(/\s+/g, "_"),
+    };
   } catch {
     return null;
   }
+}
+
+function storeUser(user: { id: string; email: string; fullName?: string; full_name?: string; role: string }) {
+  const normalized: SessionUser = {
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName ?? user.full_name ?? "",
+    role: user.role.toUpperCase().replace(/\s+/g, "_"),
+  };
+  sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(normalized));
+  return normalized;
 }
 
 export function useAtelier(sharedDbReady: boolean | null = null) {
@@ -30,8 +50,8 @@ export function useAtelier(sharedDbReady: boolean | null = null) {
   const [teamRefreshKey, setTeamRefreshKey] = useState(0);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [shareProject, setShareProject] = useState<ShareProjectContext | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [shareResultVisible, setShareResultVisible] = useState(false);
   const [dbReady, setDbReady] = useState<boolean | null>(null);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(() => readStoredUser());
 
@@ -43,7 +63,14 @@ export function useAtelier(sharedDbReady: boolean | null = null) {
 
   const show = useCallback((name: AtelierView) => {
     const unlocked = sessionStorage.getItem(STORAGE_KEY) === "1";
-    const next = !unlocked && name !== "login" ? "login" : name;
+    let next = !unlocked && name !== "login" ? "login" : name;
+    const user = readStoredUser();
+    if (next === "team" && !isOwner(user?.role)) {
+      next = "library";
+    }
+    if (next === "upload" && !canCreateProjects(user?.role)) {
+      next = "library";
+    }
     setView(next);
     document.body.dataset.protect = next === "client" ? "1" : "0";
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -85,7 +112,7 @@ export function useAtelier(sharedDbReady: boolean | null = null) {
     sessionStorage.setItem("atelier_preview_mode", "1");
     sessionStorage.setItem(STORAGE_KEY, "1");
     sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(preview.user));
-    setCurrentUser(preview.user);
+    setCurrentUser(storeUser(preview.user));
     setLoginError(null);
     show("library");
     return true;
@@ -113,7 +140,7 @@ export function useAtelier(sharedDbReady: boolean | null = null) {
         sessionStorage.removeItem("atelier_preview_mode");
         sessionStorage.setItem(STORAGE_KEY, "1");
         sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(res.user));
-        setCurrentUser(res.user);
+        setCurrentUser(storeUser(res.user as SessionUser & { full_name?: string }));
         show("library");
         return true;
       } catch (e) {
@@ -137,12 +164,14 @@ export function useAtelier(sharedDbReady: boolean | null = null) {
     [dbReady, enterPreview, show],
   );
 
-  const openShare = useCallback(() => setShareOpen(true), []);
+  const openShare = useCallback((project?: ShareProjectContext) => {
+    setShareProject(project ?? null);
+    setShareOpen(true);
+  }, []);
   const closeShare = useCallback(() => {
     setShareOpen(false);
-    setShareResultVisible(false);
+    setShareProject(null);
   }, []);
-  const generateLink = useCallback(() => setShareResultVisible(true), []);
   const openInvite = useCallback(() => setInviteOpen(true), []);
   const closeInvite = useCallback(() => setInviteOpen(false), []);
 
@@ -152,8 +181,8 @@ export function useAtelier(sharedDbReady: boolean | null = null) {
     sessionStorage.removeItem(STORAGE_KEY);
     sessionStorage.removeItem(USER_STORAGE_KEY);
     setShareOpen(false);
+    setShareProject(null);
     setInviteOpen(false);
-    setShareResultVisible(false);
     setSelectedProjectId(null);
     setEditingProjectId(null);
     setCurrentUser(null);
@@ -168,6 +197,25 @@ export function useAtelier(sharedDbReady: boolean | null = null) {
       show("login");
     }
   }, [show]);
+
+  useEffect(() => {
+    if (sessionStorage.getItem(STORAGE_KEY) !== "1") return;
+    if (!sessionStorage.getItem("atelier_access_token")) return;
+
+    let cancelled = false;
+    void fetchMeApi()
+      .then((me) => {
+        if (cancelled) return;
+        setCurrentUser(storeUser(me));
+      })
+      .catch(() => {
+        // Keep cached session user if refresh fails (offline / token expired).
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -221,11 +269,10 @@ export function useAtelier(sharedDbReady: boolean | null = null) {
     loginError,
     setLoginError,
     shareOpen,
+    shareProject,
     inviteOpen,
-    shareResultVisible,
     openShare,
     closeShare,
-    generateLink,
     openInvite,
     closeInvite,
     logout,

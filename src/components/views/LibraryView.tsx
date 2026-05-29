@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError, fetchProjectStatsApi, listMoodboardApi, listProjectsApi } from "../../lib/api";
 import type { GalleryCard } from "../../lib/atelier";
 import { projectToGalleryCard } from "../../lib/projects";
+import { canCreateProjects } from "../../lib/roles";
 import type { LibraryMode, SessionUser } from "../../hooks/useAtelier";
 import type { AtelierView } from "../../lib/atelier";
 import TopBar from "../layout/TopBar";
@@ -47,9 +48,11 @@ export default function LibraryView({
   const [cards, setCards] = useState<GalleryCardWithId[]>([]);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
-  const [stats, setStats] = useState({ projects: 412, cities: 31, venues: 87, assets: 24000 });
+  const [stats, setStats] = useState({ projects: 0, cities: 0, venues: 0, assets: 0 });
   const showHero = libraryMode === "atelier";
   const activeListMode = showHero ? atelierTab : libraryMode;
+  const canSeeDrafts = canCreateProjects(currentUser?.role);
+  const visibleFilters = canSeeDrafts ? FILTERS : FILTERS.filter((f) => f !== "Draft");
 
   useEffect(() => {
     if (libraryMode === "atelier") {
@@ -57,17 +60,23 @@ export default function LibraryView({
     }
   }, [libraryMode]);
 
+  useEffect(() => {
+    if (!canSeeDrafts && activeFilter === "Draft") {
+      setActiveFilter("All");
+    }
+  }, [activeFilter, canSeeDrafts]);
+
   const loadProjects = useCallback(async () => {
     setLoading(true);
     setListError(null);
     try {
       const eventType = FILTER_TO_API[activeFilter];
       const status = activeFilter === "Draft" ? "DRAFT" : "PUBLISHED";
-      const mine = libraryMode === "projects" && currentUser?.role !== "OWNER";
+      const mine = activeFilter === "Draft" && currentUser?.role !== "OWNER";
       const items =
         activeListMode === "moodboard"
           ? await listMoodboardApi({ eventType })
-          : await listProjectsApi({ status, eventType, mine });
+          : await listProjectsApi({ status, eventType, mine: activeFilter === "Draft" ? mine : false });
       setCards(items.map((item, i) => projectToGalleryCard(item, i)));
     } catch (e) {
       setCards([]);
@@ -77,7 +86,7 @@ export default function LibraryView({
     } finally {
       setLoading(false);
     }
-  }, [activeFilter, activeListMode, currentUser?.role, libraryMode]);
+  }, [activeFilter, activeListMode, currentUser?.role]);
 
   useEffect(() => {
     void loadProjects();
@@ -89,6 +98,8 @@ export default function LibraryView({
       .then(setStats)
       .catch(() => {});
   }, [databaseReady, projectsRefreshKey]);
+
+  const returnMode: LibraryMode = activeListMode === "moodboard" ? "moodboard" : "atelier";
 
   return (
     <section id="view-library" className="view active">
@@ -110,10 +121,8 @@ export default function LibraryView({
               for every celebration.
             </h1>
             <p className="lede">
-              Four hundred and twelve weddings, eighty-seven palaces, thirty-one cities. Each
-              project documented, tagged, and searchable in seconds — so when the conversation
-              turns to Ranthambore or a peach-and-marigold sangeet, the right reference is one
-              keystroke away.
+              Browse published projects in the shared library. Save favourites to the team moodboard
+              for quick reference across weddings, cities, and palettes.
             </p>
             <div className="hero-stats">
               <div className="stat">
@@ -149,7 +158,7 @@ export default function LibraryView({
 
       <div className="filter-row">
         <span className="filter-label">Filter</span>
-        {FILTERS.map((f) => (
+        {visibleFilters.map((f) => (
           <button
             key={f}
             type="button"
@@ -160,22 +169,24 @@ export default function LibraryView({
           </button>
         ))}
         <span className="spacer" />
-        <div className="view-toggle">
-          <button
-            type="button"
-            className={activeListMode !== "moodboard" ? "on" : ""}
-            onClick={() => (showHero ? setAtelierTab("projects") : onShowLibrary("projects"))}
-          >
-            Projects
-          </button>
-          <button
-            type="button"
-            className={activeListMode === "moodboard" ? "on" : ""}
-            onClick={() => (showHero ? setAtelierTab("moodboard") : onShowLibrary("moodboard"))}
-          >
-            Moodboard
-          </button>
-        </div>
+        {showHero && (
+          <div className="view-toggle">
+            <button
+              type="button"
+              className={activeListMode !== "moodboard" ? "on" : ""}
+              onClick={() => setAtelierTab("projects")}
+            >
+              Projects
+            </button>
+            <button
+              type="button"
+              className={activeListMode === "moodboard" ? "on" : ""}
+              onClick={() => setAtelierTab("moodboard")}
+            >
+              Moodboard
+            </button>
+          </div>
+        )}
       </div>
 
       {loading && (
@@ -187,8 +198,10 @@ export default function LibraryView({
       {!loading && cards.length === 0 && (
         <div className="save-toast">
           {activeListMode === "moodboard"
-            ? "No moodboard yet. Add moodboard."
-            : "No projects yet. Create new project."}
+            ? "No moodboard yet. Add a project from Atelier."
+            : activeFilter === "Draft"
+              ? "No drafts yet. Create a new project."
+              : "No projects yet."}
         </div>
       )}
 
@@ -197,8 +210,8 @@ export default function LibraryView({
           <div
             key={card.id}
             className={`card ${card.span}`}
-            onClick={() => onOpenProject(card.id, libraryMode)}
-            onKeyDown={(e) => e.key === "Enter" && onOpenProject(card.id, libraryMode)}
+            onClick={() => onOpenProject(card.id, returnMode)}
+            onKeyDown={(e) => e.key === "Enter" && onOpenProject(card.id, returnMode)}
             role="button"
             tabIndex={0}
           >

@@ -11,6 +11,7 @@ import {
 import type { LibraryMode, SessionUser } from "../../hooks/useAtelier";
 import type { AtelierView } from "../../lib/atelier";
 import AdminSidebar from "../layout/AdminSidebar";
+import { isOwner } from "../../lib/roles";
 import SimpleColorPicker from "../SimpleColorPicker";
 import StyleTagPicker from "../StyleTagPicker";
 
@@ -33,6 +34,23 @@ const EVENT_MAP: Record<string, string> = {
   Engagement: "ENGAGEMENT",
 };
 
+const EVENT_OPTIONS = Object.keys(EVENT_MAP);
+
+const EVENT_LABEL_BY_API: Record<string, string> = Object.fromEntries(
+  Object.entries(EVENT_MAP).map(([label, api]) => [api, label]),
+);
+
+function apiToEventLabel(api: string): string {
+  const key = api.toUpperCase();
+  if (EVENT_LABEL_BY_API[key]) return EVENT_LABEL_BY_API[key];
+  return key.charAt(0) + key.slice(1).toLowerCase().replace(/_/g, " ");
+}
+
+function eventLabelsToApi(labels: string[]): string[] {
+  const mapped = labels.map((label) => EVENT_MAP[label]).filter(Boolean);
+  return mapped.length > 0 ? mapped : ["WEDDING"];
+}
+
 const SETTING_MAP: Record<string, "OUTDOOR" | "INDOOR" | "MIXED" | "DESTINATION"> = {
   Outdoor: "OUTDOOR",
   Indoor: "INDOOR",
@@ -44,7 +62,7 @@ const ACCEPT_TYPES =
   "image/jpeg,image/png,image/heic,image/heif,video/mp4,video/quicktime,.jpg,.jpeg,.png,.heic,.heif,.mp4,.mov";
 
 const CITY_OPTIONS = [
-  "&K",
+  "J&K",
   "Himachal Pradesh",
   "Punjab",
   "Haryana",
@@ -72,7 +90,7 @@ const CITY_OPTIONS = [
   "Jodhpur",
   "Jaisalmer",
   "Nahargarh",
-  "Gujrat",
+  "Gujarat",
   "Delhi NCR",
   "Maharashtra",
   "Mumbai",
@@ -129,7 +147,7 @@ export default function UploadView({
   const [title, setTitle] = useState("");
   const [coverUrl, setCoverUrl] = useState("");
   const [theme, setTheme] = useState("");
-  const [eventType, setEventType] = useState("Wedding");
+  const [eventTypes, setEventTypes] = useState<string[]>(["Wedding"]);
   const [eventDate, setEventDate] = useState("");
   const [guestCount, setGuestCount] = useState("");
   const [venue, setVenue] = useState("");
@@ -171,7 +189,7 @@ export default function UploadView({
       setTitle("");
       setCoverUrl("");
       setTheme("");
-      setEventType("Wedding");
+      setEventTypes(["Wedding"]);
       setEventDate("");
       setGuestCount("");
       setVenue("");
@@ -196,7 +214,9 @@ export default function UploadView({
         setTitle(d.title ?? "");
         setCoverUrl(d.cover_url ?? "");
         setTheme(d.theme ?? "");
-        setEventType((d.event_types?.[0] ?? "WEDDING").toLowerCase().replace(/^./, (c) => c.toUpperCase()));
+        setEventTypes(
+          (d.event_types?.length ? d.event_types : ["WEDDING"]).map((api) => apiToEventLabel(String(api))),
+        );
         setEventDate(d.event_date ?? "");
         setGuestCount(d.guest_count ? String(d.guest_count) : "");
         setVenue(typeof d.venue === "string" ? d.venue : d.venue?.name ?? "");
@@ -270,7 +290,7 @@ export default function UploadView({
     title: title.trim() || "Untitled project",
     coverUrl: coverUrl.trim() || undefined,
     theme: theme || undefined,
-    eventTypes: [EVENT_MAP[eventType] ?? "WEDDING"],
+    eventTypes: eventLabelsToApi(eventTypes),
     eventDate: eventDate || undefined,
     guestCount: guestCount ? Number(guestCount) : undefined,
     setting: SETTING_MAP[setting] ?? "OUTDOOR",
@@ -307,7 +327,16 @@ export default function UploadView({
       ...prev,
     ]);
     return createdId;
-  }, [projectId, title, coverUrl, theme, eventType, eventDate, guestCount, setting, venue, city, narrative, photoCredit, palette, styleTags, actorName]);
+  }, [projectId, title, coverUrl, theme, eventTypes, eventDate, guestCount, setting, venue, city, narrative, photoCredit, palette, styleTags, actorName]);
+
+  const toggleEventType = (label: string) => {
+    setEventTypes((prev) => {
+      if (prev.includes(label)) {
+        return prev.length === 1 ? prev : prev.filter((item) => item !== label);
+      }
+      return [...prev, label];
+    });
+  };
 
   const saveDraft = async () => {
     setSaving(true);
@@ -483,7 +512,7 @@ export default function UploadView({
       await publishProjectApi(id);
       setSaveMsg({ type: "ok", text: "Published — visible in Atelier & Projects." });
       onPublished?.();
-      onShowLibrary("projects");
+      onShowLibrary("atelier");
     } catch (e) {
       const text =
         e instanceof ApiError && e.isDatabaseNotReady
@@ -546,11 +575,13 @@ export default function UploadView({
         <main className="admin-main">
           <div className="admin-top">
             <div>
-              <div className="crumb">Admin · Library · New Project</div>
-              <h1 className="serif">Upload an event.</h1>
+              <div className="crumb">
+                {isOwner(currentUser?.role) ? "Admin · Library · Upload projects" : "Library · Upload projects"}
+              </div>
+              <h1 className="serif">Upload projects.</h1>
             </div>
             <div className="right">
-              <button type="button" className="btn-outline" onClick={() => onShowLibrary("projects")}>
+              <button type="button" className="btn-outline" onClick={() => onShowLibrary("atelier")}>
                 Cancel
               </button>
               <button type="button" className="btn-ink" onClick={saveDraft} disabled={saving || uploading}>
@@ -593,16 +624,27 @@ export default function UploadView({
                     />
                   </div>
                 </div>
-                <div className="form-row three">
-                  <div className="form-field">
-                    <label>Event type</label>
-                    <select value={eventType} onChange={(e) => setEventType(e.target.value)}>
-                      <option>Wedding</option>
-                      <option>Sangeet</option>
-                      <option>Mehendi</option>
-                      <option>Haldi</option>
-                    </select>
+                <div className="form-row">
+                  <div className="form-field form-field--event-types">
+                    <label>
+                      Event type
+                      {eventTypes.length > 1 ? ` · ${eventTypes.length} selected` : ""}
+                    </label>
+                    <div className="event-type-chips">
+                      {EVENT_OPTIONS.map((label) => (
+                        <button
+                          key={label}
+                          type="button"
+                          className={`chip${eventTypes.includes(label) ? " on" : ""}`}
+                          onClick={() => toggleEventType(label)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                </div>
+                <div className="form-row">
                   <div className="form-field">
                     <label>Event date</label>
                     <input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />

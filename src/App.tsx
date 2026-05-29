@@ -83,8 +83,9 @@ function ActiveView({
         <ProjectView
           projectId={atelier.selectedProjectId}
           originMode={atelier.libraryReturnMode}
+          currentUser={atelier.currentUser}
           onBackFromProject={atelier.backFromProject}
-          onOpenShare={openShare}
+          onOpenShare={(project) => atelier.openShare(project)}
           onMoodboardChanged={atelier.bumpProjectsRefresh}
           onOpenMoodboard={() => atelier.showLibrary("moodboard")}
           onEditProject={atelier.openProjectForEdit}
@@ -169,9 +170,8 @@ export default function App() {
 
       <ShareModal
         open={atelier.shareOpen}
-        resultVisible={atelier.shareResultVisible}
+        project={atelier.shareProject}
         onClose={atelier.closeShare}
-        onGenerate={atelier.generateLink}
         onPreviewClient={() => {
           atelier.closeShare();
           atelier.show("client");
@@ -186,14 +186,16 @@ export default function App() {
         databaseReady={databaseReady}
       />
 
-      <DemoBar
-        view={atelier.view}
-        onNavigate={atelier.show}
-        onShowLibrary={atelier.showLibrary}
-        onOpenProject={atelier.openProject}
-        selectedProjectId={atelier.selectedProjectId}
-        onOpenShare={atelier.openShare}
-      />
+      {import.meta.env.DEV && (
+        <DemoBar
+          view={atelier.view}
+          onNavigate={atelier.show}
+          onShowLibrary={atelier.showLibrary}
+          onOpenProject={atelier.openProject}
+          selectedProjectId={atelier.selectedProjectId}
+          onOpenShare={atelier.openShare}
+        />
+      )}
     </>
   );
 }

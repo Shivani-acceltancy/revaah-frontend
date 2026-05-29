@@ -1,6 +1,7 @@
 import type { SessionUser } from "../../hooks/useAtelier";
 import type { LibraryMode } from "../../hooks/useAtelier";
 import type { AtelierView } from "../../lib/atelier";
+import { canCreateProjects, isOwner } from "../../lib/roles";
 
 type Props = {
   onNavigate: (view: AtelierView) => void;
@@ -19,6 +20,10 @@ function initials(name?: string): string {
 }
 
 export default function TopBar({ onNavigate, onShowLibrary, libraryMode, onLogout, currentUser }: Props) {
+  const role = currentUser?.role;
+  const owner = isOwner(role);
+  const creator = canCreateProjects(role);
+
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -36,36 +41,36 @@ export default function TopBar({ onNavigate, onShowLibrary, libraryMode, onLogou
           </a>
           <a
             href="#"
-            className={libraryMode === "projects" ? "on" : ""}
-            onClick={(e) => {
-              e.preventDefault();
-              onShowLibrary("projects");
-            }}
-          >
-            Projects
-          </a>
-          <a
-            href="#"
             className={libraryMode === "moodboard" ? "on" : ""}
             onClick={(e) => {
               e.preventDefault();
               onShowLibrary("moodboard");
             }}
           >
-            Moodboards
+            Moodboard
           </a>
-          <a href="#" onClick={(e) => e.preventDefault()}>
-            Shared Links
-          </a>
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault();
-              onNavigate("upload");
-            }}
-          >
-            Admin
-          </a>
+          {owner && (
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                onNavigate("team");
+              }}
+            >
+              Admin
+            </a>
+          )}
+          {!owner && creator && (
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                onNavigate("upload");
+              }}
+            >
+              New Project
+            </a>
+          )}
         </nav>
         <div className="top-actions">
           <div className="search-pill">

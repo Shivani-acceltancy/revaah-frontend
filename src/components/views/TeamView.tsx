@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ApiError,
+  approveShareRequestApi,
   fetchTeamDashboardApi,
+  listShareRequestsApi,
   resendInviteApi,
   revokeInviteApi,
   suspendTeamMemberApi,
@@ -63,12 +65,20 @@ export default function TeamView({ onNavigate, onShowLibrary, onLogout, onOpenIn
   const [editDept, setEditDept] = useState("");
   const [editName, setEditName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [shareRequests, setShareRequests] = useState<
+    Array<{ id: number; project_id: number; project_title?: string; requested_by: string; created_at: string }>
+  >([]);
 
   const load = useCallback(async (force = false) => {
     setLoading(true);
     setError(null);
     try {
       setData(await fetchTeamDashboardApi({ force }));
+      try {
+        setShareRequests(await listShareRequestsApi());
+      } catch {
+        setShareRequests([]);
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not load team");
     } finally {
@@ -127,7 +137,7 @@ export default function TeamView({ onNavigate, onShowLibrary, onLogout, onOpenIn
         <main className="admin-main">
           <div className="admin-top">
             <div>
-              <div className="crumb">Admin · Organisation · Team</div>
+              <div className="crumb">Admin · Team</div>
               <h1 className="serif">The atelier team.</h1>
             </div>
             <div className="right">
@@ -268,6 +278,39 @@ export default function TeamView({ onNavigate, onShowLibrary, onLogout, onOpenIn
                     }}
                   >
                     Revoke
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="panel" style={{ marginTop: 32 }}>
+            <div className="panel-h serif">Share link approvals</div>
+            {loading && <p className="panel-sub">Loading…</p>}
+            {!loading && shareRequests.length === 0 && (
+              <p className="panel-sub">No pending share link requests.</p>
+            )}
+            {shareRequests.map((req) => (
+              <div className="pending-row" key={req.id}>
+                <div className="info">
+                  {req.project_title ?? `Project #${req.project_id}`}
+                  <div className="sm">Requested by member · {formatInvitedAgo(req.created_at)}</div>
+                </div>
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={async () => {
+                      try {
+                        await approveShareRequestApi(req.id);
+                        await load(true);
+                        alert("Share link approved. Member can generate the link now.");
+                      } catch (e) {
+                        alert(e instanceof ApiError ? e.message : "Approve failed");
+                      }
+                    }}
+                  >
+                    Approve
                   </button>
                 </div>
               </div>

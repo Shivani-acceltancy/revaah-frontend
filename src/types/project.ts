@@ -80,4 +80,9 @@ export type ProjectDetail = {
   };
   published_at?: string;
   in_moodboard?: boolean;
+  can_add_to_moodboard?: boolean;
+  can_remove_from_moodboard?: boolean;
+  share_requires_approval?: boolean;
+  share_request_pending?: boolean;
+  share_request_approved?: boolean;
 };
